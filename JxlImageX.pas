@@ -160,7 +160,7 @@ begin
   w := FBmp.Width;
   h := FBmp.Height;
 
-  SetLength(rgb, w*h*4);
+  SetLength(rgb, w*h*3);
 
   i := 0;
   for y := 0 to H - 1 do begin
@@ -170,11 +170,12 @@ begin
       rgb[i  ] := P[4*x+2];
       rgb[i+1] := P[4*x+1];
       rgb[i+2] := P[4*x+0];
-      rgb[i+3] := P[4*x+3];
-      Inc(i,4);
+      //rgb[i+3] := P[4*x+3];
+      Inc(i,3);
     end;
   end;
 
+  q := 70;
   jxl := JxlEncodeRGB8(rgb, w, h, q);
 
   Str.Write(jxl[0], Length(jxl));
