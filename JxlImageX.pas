@@ -62,7 +62,12 @@ var
   P       : PByteArray;
 begin
   dec := TJxlDecoder.Create;  
-  dec.LoadFromStream(Str);
+
+  try
+    dec.LoadFromStream(Str);
+  except
+  end;
+
   pixels := dec.GetRGBA8;
 
   W := dec.Width;
@@ -90,7 +95,6 @@ begin
     dec.Free;
   end;
 end;
-
 
 procedure TJxlImage.Draw(ACanvas: TCanvas; const Rect: TRect);
 begin
@@ -146,7 +150,7 @@ procedure TJxlImage.EncodeToStream(Str: TStream; IsLossless: Boolean = False;
                                     CompressionLevel: Integer = 75);
 var
   rgb, jxl: TBytes;
-  w, h, q: Integer;
+  w, h, q,i,x: Integer;
   y: Integer;
   p: PByteArray;
 begin
@@ -158,9 +162,17 @@ begin
 
   SetLength(rgb, w*h*4);
 
-  for y:=0 to FBmp.Height-1 do begin
-    p := FBmp.Scanline[y];
-    Move(rgb[w*y*4], p[0], w*4);
+  i := 0;
+  for y := 0 to H - 1 do begin
+    P := FBmp.Scanline[y];
+
+    for x:=0 to W-1 do begin
+      rgb[i  ] := P[4*x+2];
+      rgb[i+1] := P[4*x+1];
+      rgb[i+2] := P[4*x+0];
+      rgb[i+3] := P[4*x+3];
+      Inc(i,4);
+    end;
   end;
 
   jxl := JxlEncodeRGB8(rgb, w, h, q);
