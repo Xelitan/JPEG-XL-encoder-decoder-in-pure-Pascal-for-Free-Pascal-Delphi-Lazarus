@@ -26,9 +26,6 @@ type
   private
     FBmp: TBitmap;
     procedure DecodeFromStream(Str: TStream);
-    // Encode the internal bitmap to Jxl and write it to Str.
-    procedure EncodeToStream(Str: TStream; IsLossless: Boolean = False;
-                             CompressionLevel: Integer = 75);
   protected
     procedure Draw(ACanvas: TCanvas; const Rect: TRect); override;
   //    function GetEmpty: Boolean; virtual; abstract;
@@ -38,8 +35,10 @@ type
     procedure SetHeight(Value: Integer); override;
     procedure SetTransparent(Value: Boolean); override;
     procedure SetWidth(Value: Integer);override;
-
   public
+    // Encode the internal bitmap to Jxl and write it to Str.
+    procedure EncodeToStream(Str: TStream; IsLossless: Boolean = False;
+                             CompressionLevel: Integer = 75);
     procedure Assign(Source: TPersistent); override;
     procedure LoadFromStream(Stream: TStream); override;
     procedure SaveToStream(Stream: TStream); override;
@@ -196,7 +195,7 @@ begin
 end;
 
 initialization
-  TPicture.RegisterFileFormat('Jxl','Jxl Image', TJxlImage);
+  TPicture.RegisterFileFormat('Jxl','JPEG XL Image', TJxlImage);
 
 finalization
   TPicture.UnregisterGraphicClass(TJxlImage);
