@@ -54,45 +54,50 @@ implementation
 
 procedure TJxlImage.DecodeFromStream(Str: TStream);
 var
-  Data    : array of Byte;
-  DataSize: NativeUInt;
-  Pixels  : TBytes;
-  W, H, y,x,i : Integer;
-  dec     : TJxlDEcoder;
-  P       : PByteArray;
+  Pixels: TBytes;
+  W, H: Integer;
+  X, Y: Integer;
+  SrcIndex: NativeInt;
+  RequiredSize: NativeUInt;
+  P: PByteArray;
+  Dec: TJxlDecoder;
 begin
-  dec := TJxlDecoder.Create;  
-
+  Dec := TJxlDecoder.Create;
   try
-    dec.LoadFromStream(Str);
-  except
-  end;
+    Dec.LoadFromStream(Str);
 
-  pixels := dec.GetRGBA8;
+    W := Dec.Width;
+    H := Dec.Height;
+    Pixels := Dec.GetRGBA8;
 
-  W := dec.Width;
-  H:= dec.Height;
+    RequiredSize := NativeUInt(W) * NativeUInt(H) * 4;
 
-  if Pixels = nil then
-    raise EInvalidGraphic.Create('Jxl decode failed');
-  try
+    if (W <= 0) or
+       (H <= 0) or
+       (NativeUInt(Length(Pixels)) < RequiredSize) then
+      raise EInvalidGraphic.Create('JXL decode failed');
+
     FBmp.PixelFormat := pf32bit;
     FBmp.SetSize(W, H);
 
-    i := 0;
-    for y := 0 to H - 1 do begin
-      P := FBmp.Scanline[y];
+    SrcIndex := 0;
 
-      for x:=0 to W-1 do begin
-        P[4*x+2] := Pixels[i];
-        P[4*x+1] := Pixels[i+1];
-        P[4*x+0] := Pixels[i+2];
-        P[4*x+3] := Pixels[i+3];
-        Inc(i,4);
+    for Y := 0 to H - 1 do
+    begin
+      P := FBmp.ScanLine[Y];
+
+      for X := 0 to W - 1 do
+      begin
+        P[X * 4 + 0] := Pixels[SrcIndex + 2];
+        P[X * 4 + 1] := Pixels[SrcIndex + 1];
+        P[X * 4 + 2] := Pixels[SrcIndex + 0];
+        P[X * 4 + 3] := Pixels[SrcIndex + 3];
+
+        Inc(SrcIndex, 4);
       end;
     end;
   finally
-    dec.Free;
+    Dec.Free;
   end;
 end;
 
@@ -147,38 +152,61 @@ begin
 end;
 
 procedure TJxlImage.EncodeToStream(Str: TStream; IsLossless: Boolean = False;
-                                    CompressionLevel: Integer = 75);
+  CompressionLevel: Integer = 75);
 var
-  rgb, jxl: TBytes;
-  w, h, q,i,x: Integer;
-  y: Integer;
-  p: PByteArray;
+  RGB, JXL: TBytes;
+  W, H: Integer;
+  x, y: Integer;
+  SrcIndex: NativeInt;
+  Quality: Integer;
+  P: PByteArray;
 begin
-  if (FBmp = nil) or (FBmp.Width <= 0) or (FBmp.Height <= 0) then
-    raise EInvalidGraphic.Create('Jxl encode: empty bitmap');
-  
-  w := FBmp.Width;
-  h := FBmp.Height;
+  if (Str = nil) or
+     (FBmp = nil) or
+     (FBmp.Width <= 0) or
+     (FBmp.Height <= 0) or
+     (NativeUInt(FBmp.Width) * NativeUInt(FBmp.Height) >
+      NativeUInt(MaxInt div 3)) then
+    raise EInvalidGraphic.Create('JXL encode failed');
 
-  SetLength(rgb, w*h*3);
+  W := FBmp.Width;
+  H := FBmp.Height;
 
-  i := 0;
-  for y := 0 to H - 1 do begin
-    P := FBmp.Scanline[y];
+  FBmp.PixelFormat := pf32bit;
 
-    for x:=0 to W-1 do begin
-      rgb[i  ] := P[4*x+2];
-      rgb[i+1] := P[4*x+1];
-      rgb[i+2] := P[4*x+0];
-      //rgb[i+3] := P[4*x+3];
-      Inc(i,3);
+  SetLength(RGB, W * H * 3);
+
+  SrcIndex := 0;
+
+  for y := 0 to H - 1 do
+  begin
+    P := FBmp.ScanLine[y];
+
+    for x := 0 to W - 1 do
+    begin
+      RGB[SrcIndex + 0] := P[x * 4 + 2];
+      RGB[SrcIndex + 1] := P[x * 4 + 1];
+      RGB[SrcIndex + 2] := P[x * 4 + 0];
+
+      Inc(SrcIndex, 3);
     end;
   end;
 
-  q := 70;
-  jxl := JxlEncodeRGB8(rgb, w, h, q);
+  if IsLossless then  Quality := 100
+  else
+  begin
+    Quality := CompressionLevel;
 
-  Str.Write(jxl[0], Length(jxl));
+    if Quality < 1 then  Quality := 1
+    else if Quality > 100 then  Quality := 100;
+  end;
+
+  JXL := JxlEncodeRGB8(RGB, W, H, Quality);
+
+  if Length(JXL) = 0 then
+    raise EInvalidGraphic.Create('JXL encode failed');
+
+  Str.WriteBuffer(JXL[0], Length(JXL));
 end;
 
 procedure TJxlImage.SaveToStream(Stream: TStream);
