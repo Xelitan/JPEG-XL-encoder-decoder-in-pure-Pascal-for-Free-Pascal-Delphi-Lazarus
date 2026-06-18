@@ -24,6 +24,12 @@ uses SysUtils, Math;
 function JxlEncodeRGB8(const rgb: array of Byte; width, height: Integer;
                        quantStep: Integer): TBytes;
 
+// Encode 8-bit RGBA (row-major, 4 bytes/pixel: R,G,B,A) to a bare JXL
+// codestream with a single 8-bit unassociated alpha extra channel.
+// quantStep >= 1 applies to all channels including alpha (1 = lossless).
+function JxlEncodeRGBA8(const rgba: array of Byte; width, height: Integer;
+                        quantStep: Integer): TBytes;
+
 implementation
 
 const
@@ -434,16 +440,19 @@ begin
     bw.WriteBits(0, 2);               // num_transforms = 0 (sel0)
 end;
 
-function JxlEncodeRGB8(const rgb: array of Byte; width, height: Integer;
-                       quantStep: Integer): TBytes;
+// Shared encode core. src is row-major with `stride` bytes per pixel
+// (3 = RGB, 4 = RGBA). When hasAlpha, the 4th source byte becomes a modular
+// extra channel (8-bit unassociated alpha), coded after the 3 colour channels.
+function JxlEncodeCore(const src: array of Byte; width, height, quantStep: Integer;
+                       hasAlpha: Boolean): TBytes;
 const
   kGroupDim = 1024;                   // group_size_shift = 3
 var
   bw: TBitWriter;
   sections: array of TBitWriter;
-  ch: array[0..2] of array of Int32;
+  ch: array[0..3] of array of Int32;  // Y, Co, Cg [, Alpha]
   treeTok: TTokenList;
-  groupTok: array of TTokenList;      // per group (3 channels each)
+  groupTok: array of TTokenList;      // per group (numChan channels each)
   allTok: TTokenList;
   treePrep, chanPrep: TPreparedCode;
   c, i, g: Integer;
@@ -453,13 +462,16 @@ var
   sizeBytes, totalPayload: Integer;
   ratio: Integer;
   useSmall: Boolean;
+  numChan, stride: Integer;
 begin
   if quantStep < 1 then quantStep := 1;
+  if hasAlpha then begin numChan := 4; stride := 4; end
+  else begin numChan := 3; stride := 3; end;
 
-  // --- forward YCoCg RCT (rct_type 6; exact inverse of InvRCT custom=6) ---
-  for c := 0 to 2 do SetLength(ch[c], width * height);
+  // --- forward YCoCg RCT on the colour channels (rct_type 6) ---
+  for c := 0 to numChan - 1 do SetLength(ch[c], width * height);
   for i := 0 to width * height - 1 do begin
-    r := rgb[i*3]; g8 := rgb[i*3+1]; b := rgb[i*3+2];
+    r := src[i*stride]; g8 := src[i*stride+1]; b := src[i*stride+2];
     vCo := r - b;
     tmp := b + ASR1(vCo);
     vCg := g8 - tmp;
@@ -467,6 +479,7 @@ begin
     ch[0][i] := Int32(vY);
     ch[1][i] := Int32(vCo);
     ch[2][i] := Int32(vCg);
+    if hasAlpha then ch[3][i] := Int32(src[i*stride+3]);  // alpha (no RCT)
   end;
 
   // --- group geometry ---
@@ -492,7 +505,7 @@ begin
     x0 := gx * kGroupDim; y0 := gy * kGroupDim;
     rw := width - x0;  if rw > kGroupDim then rw := kGroupDim;
     rh := height - y0; if rh > kGroupDim then rh := kGroupDim;
-    for c := 0 to 2 do
+    for c := 0 to numChan - 1 do
       TokenizeRect(groupTok[g], ch[c], width, x0, y0, rw, rh, quantStep);
   end;
 
@@ -571,7 +584,14 @@ begin
     bw.WriteBit(False);                      // bit_depth: integer
     bw.WriteBits(0, 2);                      // bits_per_sample = 8 (Val(8))
     bw.WriteBit(True);                       // modular_16bit_sufficient
-    bw.WriteBits(0, 2);                      // num_extra_channels = 0
+    // num_extra_channels: U32(Val0, Val1, BitsOffset(4,2), BitsOffset(12,1))
+    if hasAlpha then begin
+      bw.WriteBits(1, 2);                    // num_extra_channels = 1 (sel1=Val1)
+      // ExtraChannelInfo: all_default=1 -> 8-bit unassociated alpha (libjxl
+      // SetDefault gives type=kAlpha, 8-bit, dim_shift=0, alpha_associated=0).
+      bw.WriteBit(True);                     // ec all_default = 1
+    end else
+      bw.WriteBits(0, 2);                    // num_extra_channels = 0
     bw.WriteBit(False);                      // xyb_encoded = 0
     // ColorEncoding explicit sRGB (matching libjxl): all_default=0
     bw.WriteBit(False);                      // ce all_default = 0
@@ -591,10 +611,14 @@ begin
     bw.WriteU64Zero;                         // flags
     bw.WriteBit(False);                      // DoYCbCr = 0
     bw.WriteBits(0, 2);                      // upsampling = 1
+    if hasAlpha then
+      bw.WriteBits(0, 2);                    // extra-channel upsampling = 1
     bw.WriteBits(3, 2);                      // group_size_shift = 3
     bw.WriteBits(0, 2);                      // num_passes = 1
     bw.WriteBit(False);                      // custom_size_or_origin
-    bw.WriteBits(0, 2);                      // blend mode = replace
+    bw.WriteBits(0, 2);                      // blend mode = replace (main)
+    if hasAlpha then
+      bw.WriteBits(0, 2);                    // extra-channel blend mode = replace
     bw.WriteBit(True);                       // is_last
     bw.WriteBits(0, 2);                      // name length = 0
     bw.WriteBit(False);                      // LoopFilter all_default = 0
@@ -623,6 +647,18 @@ begin
     bw.Free;
     for i := 0 to numSections - 1 do sections[i].Free;
   end;
+end;
+
+function JxlEncodeRGB8(const rgb: array of Byte; width, height: Integer;
+                       quantStep: Integer): TBytes;
+begin
+  Result := JxlEncodeCore(rgb, width, height, quantStep, False);
+end;
+
+function JxlEncodeRGBA8(const rgba: array of Byte; width, height: Integer;
+                        quantStep: Integer): TBytes;
+begin
+  Result := JxlEncodeCore(rgba, width, height, quantStep, True);
 end;
 
 end.

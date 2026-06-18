@@ -166,7 +166,7 @@ begin
      (FBmp.Width <= 0) or
      (FBmp.Height <= 0) or
      (NativeUInt(FBmp.Width) * NativeUInt(FBmp.Height) >
-      NativeUInt(MaxInt div 3)) then
+      NativeUInt(MaxInt div 4)) then
     raise EInvalidGraphic.Create('JXL encode failed');
 
   W := FBmp.Width;
@@ -174,7 +174,7 @@ begin
 
   FBmp.PixelFormat := pf32bit;
 
-  SetLength(RGB, W * H * 3);
+  SetLength(RGB, W * H * 4);
 
   SrcIndex := 0;
 
@@ -187,8 +187,9 @@ begin
       RGB[SrcIndex + 0] := P[x * 4 + 2];
       RGB[SrcIndex + 1] := P[x * 4 + 1];
       RGB[SrcIndex + 2] := P[x * 4 + 0];
+      RGB[SrcIndex + 3] := P[x * 4 + 3];
 
-      Inc(SrcIndex, 3);
+      Inc(SrcIndex, 4);
     end;
   end;
 
@@ -201,7 +202,7 @@ begin
     else if Quality > 100 then  Quality := 100;
   end;
 
-  JXL := JxlEncodeRGB8(RGB, W, H, Quality);
+  JXL := JxlEncodeRGBA8(RGB, W, H, Quality);
 
   if Length(JXL) = 0 then
     raise EInvalidGraphic.Create('JXL encode failed');
